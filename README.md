@@ -326,10 +326,10 @@ WHERE issued_book_isbn = '978-0-307-58837-1';
 SELECT * FROM return_status
 WHERE issued_id = 'IS135';
 
--- calling function 
+
 CALL add_return_records('RS138', 'IS135', 'Good');
 
--- calling function 
+
 CALL add_return_records('RS148', 'IS140', 'Good');
 
 ```
@@ -392,24 +392,35 @@ SELECT * FROM active_members;
 Write a query to find the top 3 employees who have processed the most book issues. Display the employee name, number of books processed, and their branch.
 
 ```sql
-SELECT 
-    e.emp_name,
-    b.*,
-    COUNT(ist.issued_id) as no_book_issued
-FROM issued_status as ist
-JOIN
-employees as e
+SELECT e.emp_name,b.*,
+COUNT(ist.issued_id) as no_book_issued
+FROM issued_status as ist JOIN employees as e
 ON e.emp_id = ist.issued_emp_id
-JOIN
-branch as b
-ON e.branch_id = b.branch_id
+JOIN branch as b ON e.branch_id = b.branch_id
 GROUP BY 1, 2
+
 ```
 
 **Task 18: Identify Members Issuing High-Risk Books**  
 Write a query to identify members who have issued books more than twice with the status "damaged" in the books table. Display the member name, book title, and the number of times they've issued damaged books.    
+```sql
+SELECT
+    m.member_name,
+    b.book_title,
+    COUNT(re.book_quality),
+    COUNT(iss.issued_id)
+FROM issued_status AS iss
+JOIN members AS m
+    ON iss.issued_member_id = m.member_id
+JOIN books AS b
+    ON iss.issued_book_isbn = b.isbn
+LEFT JOIN return_status AS re
+    ON iss.issued_id = re.issued_id
+WHERE re.book_quality = 'Damaged'
+GROUP BY
+    1,2 HAVING COUNT(iss.issued_id) >= 2;
 
-
+```
 **Task 19: Stored Procedure**
 Objective:
 Create a stored procedure to manage the status of books in a library system.
@@ -421,49 +432,54 @@ If the book is available, it should be issued, and the status in the books table
 If the book is not available (status = 'no'), the procedure should return an error message indicating that the book is currently not available.
 
 ```sql
-
-CREATE OR REPLACE PROCEDURE issue_book(p_issued_id VARCHAR(10), p_issued_member_id VARCHAR(30), p_issued_book_isbn VARCHAR(30), p_issued_emp_id VARCHAR(10))
+CREATE OR REPLACE PROCEDURE update_status (
+    p_issued_id         VARCHAR(13),
+    p_member_id         VARCHAR(13),
+    p_issued_book_isbn  VARCHAR(20),
+    p_issued_emp_id     VARCHAR(18)
+)
 LANGUAGE plpgsql
 AS $$
-
 DECLARE
--- all the variabable
     v_status VARCHAR(10);
-
 BEGIN
--- all the code
-    -- checking if book is available 'yes'
-    SELECT 
-        status 
-        INTO
-        v_status
+    -- checking if book is available
+    SELECT status
+    INTO v_status
     FROM books
     WHERE isbn = p_issued_book_isbn;
 
     IF v_status = 'yes' THEN
 
-        INSERT INTO issued_status(issued_id, issued_member_id, issued_date, issued_book_isbn, issued_emp_id)
-        VALUES
-        (p_issued_id, p_issued_member_id, CURRENT_DATE, p_issued_book_isbn, p_issued_emp_id);
+        INSERT INTO issued_status (
+            issued_id,
+            issued_member_id,
+            issued_date,
+            issued_book_isbn,
+            issued_emp_id
+        )
+        VALUES (
+            p_issued_id,
+            p_member_id,
+            CURRENT_DATE,
+            p_issued_book_isbn,
+            p_issued_emp_id
+        );
 
         UPDATE books
-            SET status = 'no'
+        SET status = 'no'
         WHERE isbn = p_issued_book_isbn;
 
-        RAISE NOTICE 'Book records added successfully for book isbn : %', p_issued_book_isbn;
-
+        RAISE NOTICE 'book added successfully of isbn :%', p_issued_book_isbn;
 
     ELSE
-        RAISE NOTICE 'Sorry to inform you the book you have requested is unavailable book_isbn: %', p_issued_book_isbn;
+        RAISE NOTICE 'requested book is not available %', p_issued_book_isbn;
     END IF;
-END;
-$$
 
--- Testing The function
-SELECT * FROM books;
--- "978-0-553-29698-2" -- yes
--- "978-0-375-41398-8" -- no
-SELECT * FROM issued_status;
+END;
+$$;
+
+
 
 CALL issue_book('IS155', 'C108', '978-0-553-29698-2', 'E104');
 CALL issue_book('IS156', 'C108', '978-0-375-41398-8', 'E104');
@@ -486,9 +502,29 @@ Description: Write a CTAS query to create a new table that lists each member and
     Member ID
     Number of overdue books
     Total fines
+```sql
+SELECT
+    m.member_id,
+    COUNT(iss.issued_book_isbn) AS number_of_book_issued,
+    SUM(
+        EXTRACT(
+            DAY FROM (CURRENT_DATE - (iss.issued_date + INTERVAL '30 days'))
+        ) * 0.5
+    ) AS total_fine
+FROM issued_status AS iss
+JOIN members AS m
+    ON m.member_id = iss.issued_member_id
+JOIN books AS b
+    ON b.isbn = iss.issued_book_isbn
+LEFT JOIN return_status AS ret
+    ON ret.issued_id = iss.issued_id
+WHERE ret.return_date IS NULL
+  AND EXTRACT(
+        DAY FROM (CURRENT_DATE - (iss.issued_date + INTERVAL '30 days'))
+      ) > 0
+GROUP BY 1;
 
-
-
+```
 ## Reports
 
 - **Database Schema**: Detailed table structures and relationships.
@@ -498,3 +534,4 @@ Description: Write a CTAS query to create a new table that lists each member and
 ## Conclusion
 
 This project demonstrates the application of SQL skills in creating and managing a library management system. It includes database setup, data manipulation, and advanced querying, providing a solid foundation for data management and analysis.
+
